@@ -56,3 +56,8 @@ The frontend owns the frame-by-frame simulation loop. It calls the backend only 
 
 The first ML module is intentionally narrow: it chooses parking, not low-level driving. Cars still use deterministic routing and traffic-rule logic for movement.
 
+## Roadmap
+
+Future work is organized by GitHub milestones from V1 through V6. The long-term direction is a live, inspectable city simulation with district scenarios, procedural district expansion, NPC schedules, a district editor, and city-level history/metrics.
+
+See [docs/roadmap.md](docs/roadmap.md) for the version plan.
