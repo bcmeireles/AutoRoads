@@ -1,0 +1,17 @@
+{
+  "name": "autoroads",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local-only AI/ML autonomous city simulation with ML-assisted parking decisions.",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:backend": "python3 -m uvicorn backend.app.main:app --reload --port 8000",
+    "check": "npm --prefix frontend run build && python3 -m compileall backend/app backend/ml",
+    "test": "npm --prefix frontend run test && python3 -m pytest backend/tests"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
+
