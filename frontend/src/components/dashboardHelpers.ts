@@ -8,11 +8,26 @@ const objectiveKeys = [
   "congestionWeight",
 ] as const;
 
+const defaultObjectiveWeights: Record<(typeof objectiveKeys)[number], number> = {
+  driveTimeWeight: 0.35,
+  walkDistanceWeight: 0.25,
+  priceWeight: 0.15,
+  availabilityRiskWeight: 0.15,
+  congestionWeight: 0.1,
+};
+
 export function normalizedObjectiveWeights(settings: ScenarioSettings) {
   const total = objectiveKeys.reduce((sum, key) => sum + settings[key], 0);
+  if (total <= 0) {
+    return objectiveKeys.map((key) => ({
+      key,
+      value: defaultObjectiveWeights[key],
+    }));
+  }
+
   return objectiveKeys.map((key) => ({
     key,
-    value: total > 0 ? settings[key] / total : 0,
+    value: settings[key] / total,
   }));
 }
 
@@ -28,6 +43,7 @@ export function waitStatus(waitSeconds?: number): string {
 
 export function decisionModeLabel(car: CarAgent): string {
   if (car.modelVersion === "frontend-fallback") return "local fallback";
+  if (car.modelVersion === "heuristic-fallback") return "backend heuristic";
   if (car.modelVersion) return "backend model";
   if (!car.decisionRequested && !car.chosenSpotId) return "waiting";
   return "pending";

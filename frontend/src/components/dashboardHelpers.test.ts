@@ -40,6 +40,26 @@ describe("dashboard helpers", () => {
     expect(weights.reduce((sum, weight) => sum + weight.value, 0)).toBeCloseTo(1);
   });
 
+  it("falls back to backend default objective weights for zero totals", () => {
+    const weights = normalizedObjectiveWeights({
+      ...settings,
+      driveTimeWeight: 0,
+      walkDistanceWeight: 0,
+      priceWeight: 0,
+      availabilityRiskWeight: 0,
+      congestionWeight: 0,
+    });
+
+    expect(weights).toEqual([
+      { key: "driveTimeWeight", value: 0.35 },
+      { key: "walkDistanceWeight", value: 0.25 },
+      { key: "priceWeight", value: 0.15 },
+      { key: "availabilityRiskWeight", value: 0.15 },
+      { key: "congestionWeight", value: 0.1 },
+    ]);
+    expect(weights.reduce((sum, weight) => sum + weight.value, 0)).toBeCloseTo(1);
+  });
+
   it("formats route progress and waits", () => {
     expect(routeProgressPercent(car)).toBe(50);
     expect(waitStatus(1.25)).toBe("1.3s");
@@ -50,6 +70,7 @@ describe("dashboard helpers", () => {
     expect(decisionModeLabel(car)).toBe("waiting");
     expect(decisionModeLabel({ ...car, decisionRequested: true })).toBe("pending");
     expect(decisionModeLabel({ ...car, modelVersion: "frontend-fallback" })).toBe("local fallback");
+    expect(decisionModeLabel({ ...car, modelVersion: "heuristic-fallback" })).toBe("backend heuristic");
     expect(decisionModeLabel({ ...car, modelVersion: "parking-mlp-local-v1" })).toBe("backend model");
   });
 
