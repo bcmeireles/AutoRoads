@@ -100,3 +100,35 @@ def test_parking_decision_returns_selection_scores_and_baselines():
     assert body["baselines"][1]["strategy"] == "random"
     assert body["explanation"]
 
+
+def test_parking_decision_rejects_empty_candidate_list():
+    payload = _request_payload()
+    payload["candidates"] = []
+
+    response = client.post("/parking/decide", json=payload)
+
+    assert response.status_code == 422
+
+
+def test_parking_decision_reports_no_selection_when_all_candidates_are_ineligible():
+    payload = _request_payload()
+    for candidate in payload["candidates"]:
+        candidate["legal"] = False
+
+    response = client.post("/parking/decide", json=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["selected_spot_id"] is None
+    assert all(score["eligible"] is False for score in body["candidate_scores"])
+    assert all(baseline["spot_id"] is None for baseline in body["baselines"])
+    assert body["explanation"] == []
+
+
+def test_parking_random_baseline_is_deterministic_for_same_request():
+    first = client.post("/parking/decide", json=_request_payload())
+    second = client.post("/parking/decide", json=_request_payload())
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["baselines"][1] == second.json()["baselines"][1]
