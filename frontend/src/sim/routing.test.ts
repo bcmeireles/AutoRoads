@@ -86,6 +86,14 @@ describe("findRoute", () => {
     expect(routeDebugSummary(result)).toContain("no directed path");
   });
 
+  it("summarizes successful detailed routes for debugging", () => {
+    const result = findDetailedRoute(directedTestCity, "a", "b");
+
+    expect(result.blockedReason).toBeUndefined();
+    expect(routeDebugSummary(result)).toContain("Route ready");
+    expect(routeDebugSummary(result)).toContain("2 edges");
+  });
+
   it("increases ETA as traffic density rises", () => {
     const path = findRoute(city, "n1", "n7");
     const lightTrafficEta = estimateRouteSeconds(city, path, 0.1);
@@ -96,6 +104,10 @@ describe("findRoute", () => {
 
   it("finds the nearest graph node to a point", () => {
     expect(findNearestNode(city, { x: -70, z: -50 })).toBe("n1");
+  });
+
+  it("validates the curated city graph", () => {
+    expect(() => validateCityGraph(city)).not.toThrow();
   });
 
   it("validates graph references and duplicate IDs", () => {
