@@ -34,6 +34,18 @@ const directedTestCity = {
   ],
 } satisfies CityMap;
 
+const parallelEdgeCity = {
+  ...emptyCityParts,
+  nodes: [
+    { id: "a", position: { x: 0, z: 0 } },
+    { id: "b", position: { x: 10, z: 0 } },
+  ],
+  edges: [
+    { id: "slow-parallel", from: "a", to: "b", speedLimit: 1, oneWay: true },
+    { id: "fast-parallel", from: "a", to: "b", speedLimit: 10, oneWay: true },
+  ],
+} satisfies CityMap;
+
 describe("findRoute", () => {
   it("finds a directed route across the city", () => {
     const route = findRoute(city, "n1", "n7");
@@ -62,6 +74,21 @@ describe("findRoute", () => {
   it("exposes reverse edges only for two-way roads", () => {
     expect(outgoingEdges(city, "n2").some((edge) => edge.id === "e1-reverse")).toBe(true);
     expect(outgoingEdges(city, "n4").some((edge) => edge.id === "e3-reverse")).toBe(false);
+  });
+
+  it("keeps cached adjacency safe from outgoing edge array mutation", () => {
+    const edges = outgoingEdges(directedTestCity, "a");
+
+    edges.splice(0, edges.length);
+
+    expect(outgoingEdges(directedTestCity, "a").map((edge) => edge.id)).toEqual([
+      "slow-short",
+      "fast-leg-1",
+    ]);
+    expect(findDetailedRoute(directedTestCity, "a", "b").edgeIds).toEqual([
+      "fast-leg-1",
+      "fast-leg-2",
+    ]);
   });
 
   it("allows reverse traversal on bidirectional edges", () => {
@@ -100,6 +127,14 @@ describe("findRoute", () => {
     const heavyTrafficEta = estimateRouteSeconds(city, path, 0.9);
 
     expect(heavyTrafficEta).toBeGreaterThan(lightTrafficEta);
+  });
+
+  it("uses detailed route edge ids when estimating parallel-edge routes", () => {
+    const route = findDetailedRoute(parallelEdgeCity, "a", "b");
+
+    expect(route.nodeIds).toEqual(["a", "b"]);
+    expect(route.edgeIds).toEqual(["fast-parallel"]);
+    expect(estimateRouteSeconds(parallelEdgeCity, route, 0)).toBeCloseTo(1);
   });
 
   it("finds the nearest graph node to a point", () => {

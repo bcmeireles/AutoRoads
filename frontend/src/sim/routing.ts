@@ -21,6 +21,7 @@ type TraversableEdge = RoadEdge & {
 type RouteGraph = {
   nodesById: Map<string, Vec2>;
   adjacency: Map<string, TraversableEdge[]>;
+  edgesById: Map<string, TraversableEdge>;
 };
 
 const routeGraphCache = new WeakMap<CityMap, RouteGraph>();
@@ -134,10 +135,21 @@ export function findDetailedRoute(
 }
 
 export function outgoingEdges(city: CityMap, nodeId: string): RoadEdge[] {
-  return routeGraphFor(city).adjacency.get(nodeId) ?? [];
+  return (routeGraphFor(city).adjacency.get(nodeId) ?? []).map(({ length, ...edge }) => ({
+    ...edge,
+  }));
 }
 
-export function estimateRouteSeconds(city: CityMap, path: string[], trafficDensity: number): number {
+export function estimateRouteSeconds(
+  city: CityMap,
+  route: string[] | Pick<RouteResult, "edgeIds" | "nodeIds">,
+  trafficDensity: number,
+): number {
+  if (!Array.isArray(route)) {
+    return estimateEdgeIdsSeconds(city, route.edgeIds, trafficDensity);
+  }
+
+  const path = route;
   if (path.length < 2) return 0;
   const graph = routeGraphFor(city);
   let seconds = 0;
@@ -145,6 +157,22 @@ export function estimateRouteSeconds(city: CityMap, path: string[], trafficDensi
     const edge = graph.adjacency
       .get(path[index])
       ?.find((candidate) => candidate.to === path[index + 1]);
+    if (!edge) continue;
+    seconds += (edge.length / edge.speedLimit) * (1 + trafficDensity * 0.65);
+  }
+  return seconds;
+}
+
+function estimateEdgeIdsSeconds(
+  city: CityMap,
+  edgeIds: string[],
+  trafficDensity: number,
+): number {
+  if (edgeIds.length === 0) return 0;
+  const graph = routeGraphFor(city);
+  let seconds = 0;
+  for (const edgeId of edgeIds) {
+    const edge = graph.edgesById.get(edgeId);
     if (!edge) continue;
     seconds += (edge.length / edge.speedLimit) * (1 + trafficDensity * 0.65);
   }
@@ -181,15 +209,21 @@ function routeGraphFor(city: CityMap): RouteGraph {
   validateCityGraph(city);
   const nodesById = new Map(city.nodes.map((node) => [node.id, node.position]));
   const adjacency = new Map<string, TraversableEdge[]>();
+  const edgesById = new Map<string, TraversableEdge>();
   for (const nodeId of nodesById.keys()) adjacency.set(nodeId, []);
+
+  const addTraversableEdge = (edge: TraversableEdge) => {
+    adjacency.get(edge.from)!.push(edge);
+    edgesById.set(edge.id, edge);
+  };
 
   for (const edge of city.edges) {
     const from = nodesById.get(edge.from)!;
     const to = nodesById.get(edge.to)!;
     const length = distance(from, to);
-    adjacency.get(edge.from)!.push({ ...edge, length });
+    addTraversableEdge({ ...edge, length });
     if (!edge.oneWay) {
-      adjacency.get(edge.to)!.push({
+      addTraversableEdge({
         ...edge,
         id: `${edge.id}-reverse`,
         from: edge.to,
@@ -199,7 +233,7 @@ function routeGraphFor(city: CityMap): RouteGraph {
     }
   }
 
-  const graph = { nodesById, adjacency };
+  const graph = { nodesById, adjacency, edgesById };
   routeGraphCache.set(city, graph);
   return graph;
 }
