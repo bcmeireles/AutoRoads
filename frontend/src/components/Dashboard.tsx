@@ -1,8 +1,17 @@
-import { Car, Gauge, ParkingCircle, Play, RotateCcw, SlidersHorizontal } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Car, Gauge, ParkingCircle, Play, RefreshCw, RotateCcw, SlidersHorizontal } from "lucide-react";
 
+import { fetchModelMetrics, type ModelMetrics } from "../api/parking";
 import { city } from "../sim/city";
 import { routeEtaSeconds, selectedCar, useSimulationStore } from "../state/simulationStore";
 import type { ScenarioSettings } from "../types";
+import {
+  decisionModeLabel,
+  metricValue,
+  normalizedObjectiveWeights,
+  routeProgressPercent,
+  waitStatus,
+} from "./dashboardHelpers";
 
 const sliderGroups: {
   key: keyof ScenarioSettings;
@@ -23,11 +32,31 @@ const sliderGroups: {
 
 export function Dashboard() {
   const state = useSimulationStore();
+  const [metrics, setMetrics] = useState<ModelMetrics | null>(null);
+  const [metricsStatus, setMetricsStatus] = useState<"idle" | "loading" | "error">("idle");
   const car = selectedCar(state);
   const destination = city.destinations.find((item) => item.id === car.destinationId);
   const selectedSpot = city.parkingSpots.find((spot) => spot.id === car.chosenSpotId);
   const baselineSpot = city.parkingSpots.find((spot) => spot.id === car.baselineSpotId);
+  const randomSpot = city.parkingSpots.find((spot) => spot.id === car.randomBaselineSpotId);
   const eta = routeEtaSeconds(car, state.scenario);
+  const progress = routeProgressPercent(car);
+
+  const refreshMetrics = async () => {
+    setMetricsStatus("loading");
+    try {
+      setMetrics(await fetchModelMetrics());
+      setMetricsStatus("idle");
+    } catch {
+      setMetricsStatus("error");
+    }
+  };
+
+  useEffect(() => {
+    void refreshMetrics();
+    const interval = window.setInterval(() => void refreshMetrics(), 30_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   return (
     <aside className="dashboard">
@@ -62,6 +91,11 @@ export function Dashboard() {
             </label>
           ))}
         </div>
+        <div className="weight-readout" aria-label="Normalized objective weights">
+          {normalizedObjectiveWeights(state.scenario).map((weight) => (
+            <span key={weight.key}>{weight.value.toFixed(2)}</span>
+          ))}
+        </div>
       </section>
 
       <section className="panel">
@@ -69,11 +103,28 @@ export function Dashboard() {
           <Car size={17} />
           Selected Car
         </div>
+        <select
+          className="car-select"
+          value={car.id}
+          onChange={(event) => state.selectCar(event.currentTarget.value)}
+          aria-label="Selected car"
+        >
+          {state.cars.map((candidate) => (
+            <option key={candidate.id} value={candidate.id}>
+              {candidate.id} - {candidate.state.replace("_", " ")}
+            </option>
+          ))}
+        </select>
         <div className="stat-grid">
           <Metric label="Car" value={car.id} />
           <Metric label="State" value={car.state.replace("_", " ")} />
           <Metric label="Destination" value={destination?.name ?? car.destinationId} />
           <Metric label="Route ETA" value={`${eta.toFixed(1)}s`} />
+          <Metric label="Progress" value={`${progress.toFixed(0)}%`} />
+          <Metric label="Wait" value={waitStatus(car.waitSeconds)} />
+        </div>
+        <div className="progress-track" aria-label="Selected car route progress">
+          <span style={{ width: `${progress}%` }} />
         </div>
       </section>
 
@@ -85,16 +136,37 @@ export function Dashboard() {
         <div className="stat-grid">
           <Metric label="Chosen" value={selectedSpot?.id ?? "pending"} />
           <Metric label="Nearest baseline" value={baselineSpot?.id ?? "pending"} />
+          <Metric label="Random baseline" value={randomSpot?.id ?? "pending"} />
+          <Metric label="Mode" value={decisionModeLabel(car)} />
           <Metric label="Model" value={car.modelVersion ?? "waiting"} />
         </div>
         <div className="score-list">
           {(car.candidateScores ?? []).slice(0, 5).map((score) => (
             <div key={score.spot_id} className="score-row">
-              <span>{score.rank}. {score.spot_id}</span>
+              <span>{score.rank}. {score.spot_id}{score.eligible ? "" : " - ineligible"}</span>
               <strong>{score.score.toFixed(1)}</strong>
             </div>
           ))}
         </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-title panel-title-action">
+          <Gauge size={17} />
+          Model Metrics
+          <button type="button" onClick={refreshMetrics} title="Refresh model metrics">
+            <RefreshCw size={16} />
+          </button>
+        </div>
+        <div className="stat-grid">
+          <Metric label="Version" value={metricValue(metrics?.model_version, "waiting")} />
+          <Metric label="Trained" value={metrics ? (metrics.trained ? "yes" : "no") : "waiting"} />
+          <Metric label="Outcome" value={metricValue(metrics?.parking_outcome_score)} />
+          <Metric label="Samples" value={metricValue(metrics?.samples)} />
+          <Metric label="Delta nearest" value={metricValue(metrics?.model_delta_vs_nearest)} />
+          <Metric label="Delta random" value={metricValue(metrics?.model_delta_vs_random)} />
+        </div>
+        {metricsStatus === "error" ? <p className="muted">Metrics unavailable.</p> : null}
       </section>
 
       <section className="panel">
@@ -127,4 +199,3 @@ function Metric({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-

@@ -137,6 +137,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
           ...candidate,
           chosenSpotId,
           baselineSpotId: decision.baselines.find((baseline) => baseline.strategy === "nearest")?.spot_id ?? undefined,
+          randomBaselineSpotId: decision.baselines.find((baseline) => baseline.strategy === "random")?.spot_id ?? undefined,
           modelVersion: decision.model_version,
           explanation: decision.explanation,
           candidateScores: decision.candidate_scores,

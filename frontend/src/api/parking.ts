@@ -18,6 +18,25 @@ export type ParkingDecision = {
   model_version: string;
 };
 
+export type ModelMetrics = {
+  model_version: string;
+  trained: boolean;
+  parking_outcome_score: number | null;
+  nearest_baseline_score: number | null;
+  random_baseline_score: number | null;
+  model_delta_vs_nearest: number | null;
+  model_delta_vs_random: number | null;
+  samples: number | null;
+};
+
+export async function fetchModelMetrics(): Promise<ModelMetrics> {
+  const response = await fetch(`${API_BASE}/model/metrics`);
+  if (!response.ok) {
+    throw new Error(`Model metrics failed with ${response.status}`);
+  }
+  return response.json() as Promise<ModelMetrics>;
+}
+
 export async function decideParking(
   city: CityMap,
   car: CarAgent,
