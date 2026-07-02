@@ -57,6 +57,10 @@ function SceneContent() {
     () => new Map(selectedCar?.candidateScores?.map((score) => [score.spot_id, score]) ?? []),
     [selectedCar?.candidateScores],
   );
+  const showPendingCandidateCues =
+    selectedCar?.state === "choosing_parking" &&
+    selectedCar.decisionRequested === true &&
+    !selectedCar.candidateScores;
 
   useFrame((_, delta) => tick(Math.min(delta, 0.05)));
 
@@ -89,7 +93,7 @@ function SceneContent() {
           candidateScore={selectedScores.get(spot.id)}
           isChosen={spot.id === selectedCar?.chosenSpotId}
           isNearestBaseline={spot.id === selectedCar?.baselineSpotId}
-          showPendingCandidate={!selectedCar?.candidateScores && spot.legal && spot.accessible}
+          showPendingCandidate={showPendingCandidateCues && spot.legal && spot.accessible}
         />
       ))}
 
@@ -370,7 +374,17 @@ function RouteSegment({
 
 function routePoints(car: CarAgent): Vec2[] {
   const nextNodeIds = car.path.slice(Math.min(car.pathIndex + 1, car.path.length));
-  return [car.position, ...nextNodeIds.map(nodePosition)];
+  const points = [car.position, ...nextNodeIds.map(nodePosition)];
+  const chosenSpot = car.chosenSpotId
+    ? city.parkingSpots.find((spot) => spot.id === car.chosenSpotId)
+    : undefined;
+  if (!chosenSpot) return points;
+
+  const lastPoint = points[points.length - 1];
+  if (Math.hypot(lastPoint.x - chosenSpot.position.x, lastPoint.z - chosenSpot.position.z) < 0.1) {
+    return points;
+  }
+  return [...points, chosenSpot.position];
 }
 
 function ParkingSpotMarker({
