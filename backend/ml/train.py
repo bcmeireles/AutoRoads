@@ -18,16 +18,26 @@ METRICS_OUTPUT = Path("backend/models/metrics.json")
 def load_dataset(path: Path) -> tuple[np.ndarray, np.ndarray]:
     features: list[list[float]] = []
     labels: list[float] = []
+    grouped_candidate_rows = 0
+    filtered_grouped_candidate_rows = 0
     with path.open(encoding="utf-8") as handle:
         for line in handle:
             row = json.loads(line)
             if "candidate_features" in row:
                 for candidate_row in row["candidate_features"]:
+                    grouped_candidate_rows += 1
+                    if candidate_row.get("eligible") is False:
+                        filtered_grouped_candidate_rows += 1
+                        continue
                     features.append(candidate_row["features"])
                     labels.append(candidate_row["label"])
             else:
                 features.append(row["features"])
                 labels.append(row["label"])
+    if not features:
+        if grouped_candidate_rows and filtered_grouped_candidate_rows == grouped_candidate_rows:
+            raise ValueError("Grouped dataset contains no eligible candidate rows for training.")
+        raise ValueError("Dataset contains no rows for training.")
     return np.array(features, dtype=np.float32), np.array(labels, dtype=np.float32)
 
 
