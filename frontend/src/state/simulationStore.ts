@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { decideParking, localFallbackDecision } from "../api/parking";
 import { city, initialCars } from "../sim/city";
 import { estimateRouteSeconds, findRoute } from "../sim/routing";
+import { controlStateAt } from "../sim/trafficControls";
 import type { CarAgent, ScenarioSettings } from "../types";
 
 type SimulationStore = {
@@ -66,7 +67,14 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     const cars: CarAgent[] = state.cars.map((car) => {
       if (car.state === "parked" || car.state === "choosing_parking") return car;
       if (car.waitSeconds && car.waitSeconds > 0) {
-        return { ...car, waitSeconds: Math.max(0, car.waitSeconds - delta) };
+        const waitSeconds = Math.max(0, car.waitSeconds - delta);
+        return {
+          ...car,
+          waitSeconds,
+          waitReason: waitSeconds > 0 ? car.waitReason : undefined,
+          clearedControlNodeId: waitSeconds === 0 ? car.waitingForControlNodeId : car.clearedControlNodeId,
+          waitingForControlNodeId: waitSeconds > 0 ? car.waitingForControlNodeId : undefined,
+        };
       }
 
       const nextNodeId = car.path[car.pathIndex + 1];
@@ -86,19 +94,34 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       }
 
       const nextNode = nodeById(nextNodeId);
+      if (car.clearedControlNodeId !== nextNodeId) {
+        const controlState = controlStateAt(nextNode, elapsedSeconds, car.currentNodeId);
+        if (!controlState.canEnter) {
+          return {
+            ...car,
+            state: car.chosenSpotId ? "parking" : "driving",
+            waitSeconds: controlState.waitSeconds,
+            waitReason: controlState.reason,
+            waitingForControlNodeId: nextNodeId,
+          };
+        }
+      }
+
       const dx = nextNode.position.x - car.position.x;
       const dz = nextNode.position.z - car.position.z;
       const distance = Math.hypot(dx, dz);
       const step = Math.max(2, car.speed * trafficMultiplier) * delta;
 
       if (distance <= step) {
-        const waitSeconds = waitForControl(nextNodeId, elapsedSeconds);
         return {
           ...car,
           position: { ...nextNode.position },
           currentNodeId: nextNodeId,
           pathIndex: car.pathIndex + 1,
-          waitSeconds,
+          clearedControlNodeId: undefined,
+          waitReason: undefined,
+          waitSeconds: 0,
+          waitingForControlNodeId: undefined,
         };
       }
 
@@ -142,6 +165,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
           candidateScores: decision.candidate_scores,
           path: path.length > 0 ? path : candidate.path,
           pathIndex: 0,
+          clearedControlNodeId: undefined,
           state: path.length > 0 ? "parking" : "blocked",
         };
       }),
@@ -155,14 +179,4 @@ export function selectedCar(state: Pick<SimulationStore, "cars" | "selectedCarId
 
 export function routeEtaSeconds(car: CarAgent, scenario: ScenarioSettings): number {
   return estimateRouteSeconds(city, car.path.slice(car.pathIndex), scenario.trafficDensity);
-}
-
-function waitForControl(nodeId: string, elapsedSeconds: number): number {
-  const node = nodeById(nodeId);
-  if (node.control === "stop") return 0.8;
-  if (node.control === "traffic-light") {
-    const phase = Math.floor(elapsedSeconds / 7) % 2;
-    return phase === 0 ? 0 : 1.8;
-  }
-  return 0;
 }

@@ -74,6 +74,7 @@ export function Dashboard() {
           <Metric label="State" value={car.state.replace("_", " ")} />
           <Metric label="Destination" value={destination?.name ?? car.destinationId} />
           <Metric label="Route ETA" value={`${eta.toFixed(1)}s`} />
+          <Metric label="Wait" value={waitStatus(car.waitReason, car.waitSeconds)} />
         </div>
       </section>
 
@@ -128,3 +129,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function waitStatus(reason?: string, waitSeconds = 0): string {
+  if (!reason || waitSeconds <= 0) return "clear";
+  return `${reason} (${waitSeconds.toFixed(1)}s)`;
+}

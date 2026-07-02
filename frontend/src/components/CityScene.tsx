@@ -4,8 +4,9 @@ import { useMemo } from "react";
 import * as THREE from "three";
 
 import { city } from "../sim/city";
+import { controlStateAt } from "../sim/trafficControls";
 import { useSimulationStore } from "../state/simulationStore";
-import type { Building, RoadEdge, Vec2 } from "../types";
+import type { Building, RoadEdge, RoadNode, Vec2 } from "../types";
 
 const nodePosition = (id: string) => city.nodes.find((node) => node.id === id)!.position;
 
@@ -67,8 +68,7 @@ function SceneContent() {
         .map((node) => (
           <TrafficControl
             key={node.id}
-            position={node.position}
-            kind={node.control!}
+            node={node}
             elapsedSeconds={elapsedSeconds}
           />
         ))}
@@ -150,21 +150,27 @@ function DestinationPin({ position, name }: { position: Vec2; name: string }) {
 }
 
 function TrafficControl({
-  position,
-  kind,
+  node,
   elapsedSeconds,
 }: {
-  position: Vec2;
-  kind: "stop" | "traffic-light";
+  node: RoadNode;
   elapsedSeconds: number;
 }) {
-  const isGreen = Math.floor(elapsedSeconds / 7) % 2 === 1;
-  const color = kind === "stop" ? "#dc2626" : isGreen ? "#22c55e" : "#ef4444";
+  const state = controlStateAt(node, elapsedSeconds);
+  const color = state.signal === "stop" ? "#dc2626" : state.signal === "green" ? "#22c55e" : "#ef4444";
   const geometry = useMemo(() => new THREE.CylinderGeometry(1.8, 1.8, 4, 16), []);
+  const y = state.signal === "stop" ? 1.4 : 2.2;
   return (
-    <mesh position={[position.x + 5, 2, position.z + 5]} geometry={geometry}>
-      <meshStandardMaterial color={color} />
-    </mesh>
+    <group position={[node.position.x + 5, y, node.position.z + 5]}>
+      <mesh geometry={geometry}>
+        <meshStandardMaterial color={color} />
+      </mesh>
+      {node.control?.kind === "traffic-light" ? (
+        <mesh position={[0, 2.8, 0]}>
+          <sphereGeometry args={[1.4, 16, 16]} />
+          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.35} />
+        </mesh>
+      ) : null}
+    </group>
   );
 }
-

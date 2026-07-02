@@ -1,18 +1,32 @@
-import type { CarAgent, CityMap } from "../types";
+import type { CarAgent, CityMap, TrafficControlConfig } from "../types";
+
+const stopSign = (stopDurationSeconds = 0.9): TrafficControlConfig => ({
+  kind: "stop",
+  stopDurationSeconds,
+});
+
+const trafficLight = (programId: string): TrafficControlConfig => ({
+  kind: "traffic-light",
+  programId,
+  phases: [
+    { state: "green", durationSeconds: 7 },
+    { state: "red", durationSeconds: 7 },
+  ],
+});
 
 export const city: CityMap = {
   nodes: [
     { id: "n1", position: { x: -72, z: -48 } },
-    { id: "n2", position: { x: -24, z: -48 }, control: "stop" },
+    { id: "n2", position: { x: -24, z: -48 }, control: stopSign() },
     { id: "n3", position: { x: 24, z: -48 } },
-    { id: "n4", position: { x: 72, z: -48 }, control: "traffic-light" },
-    { id: "n5", position: { x: -72, z: 0 }, control: "traffic-light" },
+    { id: "n4", position: { x: 72, z: -48 }, control: trafficLight("east-entry") },
+    { id: "n5", position: { x: -72, z: 0 }, control: trafficLight("west-canal") },
     { id: "n6", position: { x: -24, z: 0 } },
-    { id: "n7", position: { x: 24, z: 0 }, control: "stop" },
+    { id: "n7", position: { x: 24, z: 0 }, control: stopSign() },
     { id: "n8", position: { x: 72, z: 0 } },
     { id: "n9", position: { x: -72, z: 48 } },
-    { id: "n10", position: { x: -24, z: 48 }, control: "stop" },
-    { id: "n11", position: { x: 24, z: 48 }, control: "traffic-light" },
+    { id: "n10", position: { x: -24, z: 48 }, control: stopSign() },
+    { id: "n11", position: { x: 24, z: 48 }, control: trafficLight("station-crossing") },
     { id: "n12", position: { x: 72, z: 48 } },
   ],
   edges: [
@@ -206,4 +220,3 @@ export const initialCars: CarAgent[] = [
     speed: 10,
   },
 ];
-
