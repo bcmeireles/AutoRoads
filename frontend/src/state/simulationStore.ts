@@ -68,11 +68,15 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       if (car.state === "parked" || car.state === "choosing_parking") return car;
       if (car.waitSeconds && car.waitSeconds > 0) {
         const waitSeconds = Math.max(0, car.waitSeconds - delta);
+        const waitingNode = car.waitingForControlNodeId ? nodeById(car.waitingForControlNodeId) : undefined;
         return {
           ...car,
           waitSeconds,
           waitReason: waitSeconds > 0 ? car.waitReason : undefined,
-          clearedControlNodeId: waitSeconds === 0 ? car.waitingForControlNodeId : car.clearedControlNodeId,
+          clearedControlNodeId:
+            waitSeconds === 0 && waitingNode?.control?.kind === "stop"
+              ? car.waitingForControlNodeId
+              : car.clearedControlNodeId,
           waitingForControlNodeId: waitSeconds > 0 ? car.waitingForControlNodeId : undefined,
         };
       }
@@ -94,25 +98,25 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       }
 
       const nextNode = nodeById(nextNodeId);
-      if (car.clearedControlNodeId !== nextNodeId) {
-        const controlState = controlStateAt(nextNode, elapsedSeconds, car.currentNodeId);
-        if (!controlState.canEnter) {
-          return {
-            ...car,
-            state: car.chosenSpotId ? "parking" : "driving",
-            waitSeconds: controlState.waitSeconds,
-            waitReason: controlState.reason,
-            waitingForControlNodeId: nextNodeId,
-          };
-        }
-      }
-
       const dx = nextNode.position.x - car.position.x;
       const dz = nextNode.position.z - car.position.z;
       const distance = Math.hypot(dx, dz);
       const step = Math.max(2, car.speed * trafficMultiplier) * delta;
 
       if (distance <= step) {
+        if (car.clearedControlNodeId !== nextNodeId) {
+          const controlState = controlStateAt(nextNode, elapsedSeconds, car.currentNodeId);
+          if (!controlState.canEnter) {
+            return {
+              ...car,
+              state: car.chosenSpotId ? "parking" : "driving",
+              waitSeconds: controlState.waitSeconds,
+              waitReason: controlState.reason,
+              waitingForControlNodeId: nextNodeId,
+            };
+          }
+        }
+
         return {
           ...car,
           position: { ...nextNode.position },
