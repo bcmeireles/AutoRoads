@@ -81,6 +81,7 @@ export type CarAgent = {
   explanation?: ExplanationTerm[];
   candidateScores?: CandidateScore[];
   decisionRequested?: boolean;
+  parkingDecisionRequestId?: string;
   waitSeconds?: number;
 };
 
@@ -105,4 +106,3 @@ export type CityMap = {
   destinations: Destination[];
   parkingSpots: ParkingSpot[];
 };
-
