@@ -7,6 +7,7 @@ import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { city } from "../sim/city";
 import { useSimulationStore } from "../state/simulationStore";
 import type { Building, CandidateScore, CarAgent, ParkingSpot, RoadEdge, Vec2 } from "../types";
+import { sceneRoutePoints, shouldShowPendingCandidateCues } from "./citySceneHelpers";
 
 const nodePosition = (id: string) => city.nodes.find((node) => node.id === id)!.position;
 
@@ -57,10 +58,7 @@ function SceneContent() {
     () => new Map(selectedCar?.candidateScores?.map((score) => [score.spot_id, score]) ?? []),
     [selectedCar?.candidateScores],
   );
-  const showPendingCandidateCues =
-    selectedCar?.state === "choosing_parking" &&
-    selectedCar.decisionRequested === true &&
-    !selectedCar.candidateScores;
+  const showPendingCandidateCues = shouldShowPendingCandidateCues(selectedCar);
 
   useFrame((_, delta) => tick(Math.min(delta, 0.05)));
 
@@ -373,18 +371,7 @@ function RouteSegment({
 }
 
 function routePoints(car: CarAgent): Vec2[] {
-  const nextNodeIds = car.path.slice(Math.min(car.pathIndex + 1, car.path.length));
-  const points = [car.position, ...nextNodeIds.map(nodePosition)];
-  const chosenSpot = car.chosenSpotId
-    ? city.parkingSpots.find((spot) => spot.id === car.chosenSpotId)
-    : undefined;
-  if (!chosenSpot) return points;
-
-  const lastPoint = points[points.length - 1];
-  if (Math.hypot(lastPoint.x - chosenSpot.position.x, lastPoint.z - chosenSpot.position.z) < 0.1) {
-    return points;
-  }
-  return [...points, chosenSpot.position];
+  return sceneRoutePoints(car, city.nodes, city.parkingSpots);
 }
 
 function ParkingSpotMarker({
