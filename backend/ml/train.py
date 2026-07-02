@@ -21,8 +21,13 @@ def load_dataset(path: Path) -> tuple[np.ndarray, np.ndarray]:
     with path.open(encoding="utf-8") as handle:
         for line in handle:
             row = json.loads(line)
-            features.append(row["features"])
-            labels.append(row["label"])
+            if "candidate_features" in row:
+                for candidate_row in row["candidate_features"]:
+                    features.append(candidate_row["features"])
+                    labels.append(candidate_row["label"])
+            else:
+                features.append(row["features"])
+                labels.append(row["label"])
     return np.array(features, dtype=np.float32), np.array(labels, dtype=np.float32)
 
 
@@ -114,4 +119,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
