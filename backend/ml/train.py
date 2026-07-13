@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from backend.app.feature_engineering import FEATURE_NAMES
+from backend.ml.dataset_schema import parse_grouped_dataset
 from backend.ml.generate_dataset import DEFAULT_OUTPUT, generate_dataset
 
 
@@ -16,13 +17,38 @@ METRICS_OUTPUT = Path("backend/models/metrics.json")
 
 
 def load_dataset(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    first_row: dict[str, object] | None = None
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                first_row = json.loads(line)
+                break
+
+    if first_row is not None and (
+        "metadata" in first_row or "candidate_features" in first_row
+    ):
+        records = parse_grouped_dataset(path)
+        eligible_records = [record for record in records if record.eligible]
+        if records and not eligible_records:
+            raise ValueError("Grouped dataset contains no eligible candidate rows for training.")
+        if not eligible_records:
+            raise ValueError("Dataset contains no rows for training.")
+        return (
+            np.array([record.features for record in eligible_records], dtype=np.float32),
+            np.array([record.label for record in eligible_records], dtype=np.float32),
+        )
+
     features: list[list[float]] = []
     labels: list[float] = []
     with path.open(encoding="utf-8") as handle:
         for line in handle:
+            if not line.strip():
+                continue
             row = json.loads(line)
             features.append(row["features"])
             labels.append(row["label"])
+    if not features:
+        raise ValueError("Dataset contains no rows for training.")
     return np.array(features, dtype=np.float32), np.array(labels, dtype=np.float32)
 
 
@@ -114,4 +140,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
