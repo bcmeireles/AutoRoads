@@ -137,6 +137,17 @@ describe("findRoute", () => {
     expect(estimateRouteSeconds(parallelEdgeCity, route, 0)).toBeCloseTo(1);
   });
 
+  it("uses the routed minimum-cost parallel edge for node-only ETA", () => {
+    const path = findRoute(parallelEdgeCity, "a", "b");
+    const detailedRoute = findDetailedRoute(parallelEdgeCity, "a", "b");
+
+    expect(detailedRoute.edgeIds).toEqual(["fast-parallel"]);
+    expect(path).toEqual(detailedRoute.nodeIds);
+    expect(estimateRouteSeconds(parallelEdgeCity, path, 0)).toBeCloseTo(
+      detailedRoute.etaSeconds,
+    );
+  });
+
   it("finds the nearest graph node to a point", () => {
     expect(findNearestNode(city, { x: -70, z: -50 })).toBe("n1");
   });
@@ -185,4 +196,39 @@ describe("findRoute", () => {
     expect(() => validateCityGraph(invalidCity)).toThrow(/Destination/);
     expect(() => validateCityGraph(invalidCity)).toThrow(/Parking spot/);
   });
+
+  it("rejects authored edge ids that collide with generated reverse traversal ids", () => {
+    const collidingCity = {
+      ...emptyCityParts,
+      nodes: [
+        { id: "a", position: { x: 0, z: 0 } },
+        { id: "b", position: { x: 10, z: 0 } },
+        { id: "c", position: { x: 20, z: 0 } },
+      ],
+      edges: [
+        { id: "road", from: "a", to: "b", speedLimit: 10 },
+        { id: "road-reverse", from: "b", to: "c", speedLimit: 5, oneWay: true },
+      ],
+    } satisfies CityMap;
+
+    expect(() => validateCityGraph(collidingCity)).toThrow(
+      /Generated reverse traversal id "road-reverse".*collides with an authored edge id/,
+    );
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    "rejects a non-finite speed limit of %s",
+    (speedLimit) => {
+      const invalidCity = {
+        ...emptyCityParts,
+        nodes: [
+          { id: "a", position: { x: 0, z: 0 } },
+          { id: "b", position: { x: 10, z: 0 } },
+        ],
+        edges: [{ id: "invalid-speed", from: "a", to: "b", speedLimit, oneWay: true }],
+      } satisfies CityMap;
+
+      expect(() => validateCityGraph(invalidCity)).toThrow(/finite positive speed limit/);
+    },
+  );
 });

@@ -26,6 +26,8 @@ type RouteGraph = {
 
 const routeGraphCache = new WeakMap<CityMap, RouteGraph>();
 
+const traversalCost = (edge: TraversableEdge) => edge.length / edge.speedLimit;
+
 export function validateCityGraph(city: CityMap): void {
   const errors: string[] = [];
   const nodeIds = new Set<string>();
@@ -50,8 +52,16 @@ export function validateCityGraph(city: CityMap): void {
     if (!nodeIds.has(edge.to)) {
       errors.push(`Edge "${edge.id}" references missing to node "${edge.to}".`);
     }
-    if (edge.speedLimit <= 0) {
-      errors.push(`Edge "${edge.id}" must have a positive speed limit.`);
+    if (!Number.isFinite(edge.speedLimit) || edge.speedLimit <= 0) {
+      errors.push(`Edge "${edge.id}" must have a finite positive speed limit.`);
+    }
+  }
+
+  for (const edge of city.edges) {
+    if (!edge.oneWay && edgeIds.has(`${edge.id}-reverse`)) {
+      errors.push(
+        `Generated reverse traversal id "${edge.id}-reverse" for edge "${edge.id}" collides with an authored edge id.`,
+      );
     }
   }
 
@@ -109,7 +119,7 @@ export function findDetailedRoute(
 
     for (const edge of graph.adjacency.get(current) ?? []) {
       if (!unvisited.has(edge.to)) continue;
-      const cost = edge.length / edge.speedLimit;
+      const cost = traversalCost(edge);
       const candidateDistance = (distances.get(current) ?? Infinity) + cost;
       if (candidateDistance < (distances.get(edge.to) ?? Infinity)) {
         distances.set(edge.to, candidateDistance);
@@ -154,13 +164,21 @@ export function estimateRouteSeconds(
   const graph = routeGraphFor(city);
   let seconds = 0;
   for (let index = 0; index < path.length - 1; index += 1) {
-    const edge = graph.adjacency
-      .get(path[index])
-      ?.find((candidate) => candidate.to === path[index + 1]);
+    const edge = minimumCostEdge(graph.adjacency.get(path[index]) ?? [], path[index + 1]);
     if (!edge) continue;
-    seconds += (edge.length / edge.speedLimit) * (1 + trafficDensity * 0.65);
+    seconds += traversalCost(edge) * (1 + trafficDensity * 0.65);
   }
   return seconds;
+}
+
+function minimumCostEdge(edges: TraversableEdge[], toNodeId: string): TraversableEdge | undefined {
+  let best: TraversableEdge | undefined;
+  for (const edge of edges) {
+    if (edge.to === toNodeId && (!best || traversalCost(edge) < traversalCost(best))) {
+      best = edge;
+    }
+  }
+  return best;
 }
 
 function estimateEdgeIdsSeconds(
@@ -174,7 +192,7 @@ function estimateEdgeIdsSeconds(
   for (const edgeId of edgeIds) {
     const edge = graph.edgesById.get(edgeId);
     if (!edge) continue;
-    seconds += (edge.length / edge.speedLimit) * (1 + trafficDensity * 0.65);
+    seconds += traversalCost(edge) * (1 + trafficDensity * 0.65);
   }
   return seconds;
 }
