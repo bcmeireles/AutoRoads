@@ -77,6 +77,7 @@ export type CarAgent = {
   speed: number;
   chosenSpotId?: string;
   baselineSpotId?: string;
+  randomBaselineSpotId?: string;
   modelVersion?: string;
   explanation?: ExplanationTerm[];
   candidateScores?: CandidateScore[];
@@ -105,4 +106,3 @@ export type CityMap = {
   destinations: Destination[];
   parkingSpots: ParkingSpot[];
 };
-

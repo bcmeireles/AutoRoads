@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { decideParking, localFallbackDecision } from "../api/parking";
+import { decideParking, localFallbackDecision, type ParkingDecision } from "../api/parking";
 import { city, initialCars } from "../sim/city";
 import { estimateRouteSeconds, findRoute } from "../sim/routing";
 import type { CarAgent, ScenarioSettings } from "../types";
@@ -34,11 +34,49 @@ const defaultScenario: ScenarioSettings = {
   congestionWeight: 0.1,
 };
 
+function createInitialCars(): CarAgent[] {
+  return initialCars.map((car) => ({
+    ...car,
+    position: { ...car.position },
+    path: [...car.path],
+    chosenSpotId: undefined,
+    baselineSpotId: undefined,
+    randomBaselineSpotId: undefined,
+    modelVersion: undefined,
+    explanation: undefined,
+    candidateScores: undefined,
+    decisionRequested: undefined,
+    waitSeconds: undefined,
+  }));
+}
+
+// This is the shared decision boundary for legacy and future state-machine flows.
+export function applyParkingDecision(car: CarAgent, decision: ParkingDecision): CarAgent {
+  const chosenSpotId = decision.selected_spot_id ?? undefined;
+  const spot = chosenSpotId ? spotById(chosenSpotId) : undefined;
+  const path = spot ? findRoute(city, car.currentNodeId, spot.nodeId) : [];
+
+  return {
+    ...car,
+    chosenSpotId,
+    baselineSpotId:
+      decision.baselines.find((baseline) => baseline.strategy === "nearest")?.spot_id ?? undefined,
+    randomBaselineSpotId:
+      decision.baselines.find((baseline) => baseline.strategy === "random")?.spot_id ?? undefined,
+    modelVersion: decision.model_version,
+    explanation: decision.explanation,
+    candidateScores: decision.candidate_scores,
+    path: path.length > 0 ? path : car.path,
+    pathIndex: 0,
+    state: path.length > 0 ? "parking" : "blocked",
+  };
+}
+
 export const useSimulationStore = create<SimulationStore>((set, get) => ({
   elapsedSeconds: 0,
   selectedCarId: "car-1",
   paused: false,
-  cars: initialCars,
+  cars: createInitialCars(),
   scenario: defaultScenario,
   selectCar: (carId) => set({ selectedCarId: carId }),
   setScenario: (key, value) =>
@@ -51,7 +89,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   reset: () =>
     set({
       elapsedSeconds: 0,
-      cars: initialCars.map((car) => ({ ...car, position: { ...car.position } })),
+      cars: createInitialCars(),
       selectedCarId: "car-1",
       paused: false,
       scenario: defaultScenario,
@@ -127,24 +165,10 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       decision = localFallbackDecision(city, car, destination, state.scenario);
     }
 
-    const chosenSpotId = decision.selected_spot_id ?? undefined;
     set((latest) => ({
-      cars: latest.cars.map((candidate) => {
-        if (candidate.id !== carId) return candidate;
-        const spot = chosenSpotId ? spotById(chosenSpotId) : undefined;
-        const path = spot ? findRoute(city, candidate.currentNodeId, spot.nodeId) : [];
-        return {
-          ...candidate,
-          chosenSpotId,
-          baselineSpotId: decision.baselines.find((baseline) => baseline.strategy === "nearest")?.spot_id ?? undefined,
-          modelVersion: decision.model_version,
-          explanation: decision.explanation,
-          candidateScores: decision.candidate_scores,
-          path: path.length > 0 ? path : candidate.path,
-          pathIndex: 0,
-          state: path.length > 0 ? "parking" : "blocked",
-        };
-      }),
+      cars: latest.cars.map((candidate) =>
+        candidate.id === carId ? applyParkingDecision(candidate, decision) : candidate,
+      ),
     }));
   },
 }));

@@ -18,7 +18,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -109,6 +110,20 @@ input {
   border-color: #4f8a78;
 }
 
+.panel-title-action button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-left: auto;
+  border: 1px solid #c3d4cd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #12342a;
+  cursor: pointer;
+}
+
 .clock {
   margin-left: auto;
   font-variant-numeric: tabular-nums;
@@ -157,6 +172,34 @@ input {
   font-variant-numeric: tabular-nums;
 }
 
+.weight-readout {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.weight-readout span {
+  border: 1px solid #e2ebe7;
+  border-radius: 8px;
+  padding: 6px 4px;
+  background: #fbfdfc;
+  color: #40514a;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.car-select {
+  width: 100%;
+  margin-bottom: 10px;
+  border: 1px solid #c3d4cd;
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: #ffffff;
+  color: #132c25;
+}
+
 .stat-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -184,6 +227,21 @@ input {
   font-size: 14px;
   overflow-wrap: anywhere;
   text-transform: capitalize;
+}
+
+.progress-track {
+  height: 8px;
+  margin-top: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e5efeb;
+}
+
+.progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #0f766e;
 }
 
 .score-list,
@@ -253,4 +311,3 @@ input {
     grid-template-columns: 1fr;
   }
 }
-
