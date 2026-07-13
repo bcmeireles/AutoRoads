@@ -1,14 +1,14 @@
 import type { CarAgent, ScenarioSettings } from "../types";
 
-const objectiveKeys = [
-  "driveTimeWeight",
-  "walkDistanceWeight",
-  "priceWeight",
-  "availabilityRiskWeight",
-  "congestionWeight",
+const objectives = [
+  { key: "driveTimeWeight", label: "Drive time", shortLabel: "Drive" },
+  { key: "walkDistanceWeight", label: "Walk distance", shortLabel: "Walk" },
+  { key: "priceWeight", label: "Price", shortLabel: "Price" },
+  { key: "availabilityRiskWeight", label: "Availability risk", shortLabel: "Avail." },
+  { key: "congestionWeight", label: "Congestion", shortLabel: "Cong." },
 ] as const;
 
-const defaultObjectiveWeights: Record<(typeof objectiveKeys)[number], number> = {
+const defaultObjectiveWeights: Record<(typeof objectives)[number]["key"], number> = {
   driveTimeWeight: 0.35,
   walkDistanceWeight: 0.25,
   priceWeight: 0.15,
@@ -17,18 +17,69 @@ const defaultObjectiveWeights: Record<(typeof objectiveKeys)[number], number> = 
 };
 
 export function normalizedObjectiveWeights(settings: ScenarioSettings) {
-  const total = objectiveKeys.reduce((sum, key) => sum + settings[key], 0);
+  const total = objectives.reduce((sum, objective) => sum + settings[objective.key], 0);
   if (total <= 0) {
-    return objectiveKeys.map((key) => ({
-      key,
-      value: defaultObjectiveWeights[key],
+    return objectives.map((objective) => ({
+      ...objective,
+      value: defaultObjectiveWeights[objective.key],
     }));
   }
 
-  return objectiveKeys.map((key) => ({
-    key,
-    value: settings[key] / total,
+  return objectives.map((objective) => ({
+    ...objective,
+    value: settings[objective.key] / total,
   }));
+}
+
+type MetricsPollingOptions<T> = {
+  load: () => Promise<T>;
+  onLoading: () => void;
+  onSuccess: (value: T) => void;
+  onError: () => void;
+  intervalMs?: number;
+  setIntervalFn?: typeof globalThis.setInterval;
+  clearIntervalFn?: typeof globalThis.clearInterval;
+};
+
+export type MetricsPollingController = {
+  initialLoad: Promise<void>;
+  refresh: () => Promise<void>;
+  stop: () => void;
+};
+
+export function startMetricsPolling<T>({
+  load,
+  onLoading,
+  onSuccess,
+  onError,
+  intervalMs = 30_000,
+  setIntervalFn = globalThis.setInterval,
+  clearIntervalFn = globalThis.clearInterval,
+}: MetricsPollingOptions<T>): MetricsPollingController {
+  let active = true;
+
+  const refresh = async () => {
+    if (!active) return;
+    onLoading();
+    try {
+      const value = await load();
+      if (active) onSuccess(value);
+    } catch {
+      if (active) onError();
+    }
+  };
+
+  const initialLoad = refresh();
+  const interval = setIntervalFn(() => void refresh(), intervalMs);
+
+  return {
+    initialLoad,
+    refresh,
+    stop: () => {
+      active = false;
+      clearIntervalFn(interval);
+    },
+  };
 }
 
 export function routeProgressPercent(car: CarAgent): number {
