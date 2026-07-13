@@ -3,6 +3,12 @@ import { create } from "zustand";
 import { decideParking, localFallbackDecision } from "../api/parking";
 import { city, initialCars } from "../sim/city";
 import { estimateRouteSeconds, findRoute } from "../sim/routing";
+import {
+  advanceTrafficControlWait,
+  completeTrafficControlEntry,
+  hasActiveTrafficControlWait,
+  resolveTrafficControlArrival,
+} from "../sim/trafficControls";
 import type { CarAgent, ScenarioSettings } from "../types";
 
 type SimulationStore = {
@@ -65,8 +71,12 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
     const cars: CarAgent[] = state.cars.map((car) => {
       if (car.state === "parked" || car.state === "choosing_parking") return car;
-      if (car.waitSeconds && car.waitSeconds > 0) {
-        return { ...car, waitSeconds: Math.max(0, car.waitSeconds - delta) };
+      if (hasActiveTrafficControlWait(car)) {
+        const waitingNode = car.waitingForControlNodeId ? nodeById(car.waitingForControlNodeId) : undefined;
+        return {
+          ...car,
+          ...advanceTrafficControlWait(car, delta, waitingNode),
+        };
       }
 
       const nextNodeId = car.path[car.pathIndex + 1];
@@ -89,16 +99,31 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       const dx = nextNode.position.x - car.position.x;
       const dz = nextNode.position.z - car.position.z;
       const distance = Math.hypot(dx, dz);
-      const step = Math.max(2, car.speed * trafficMultiplier) * delta;
+      const speedPerSecond = Math.max(2, car.speed * trafficMultiplier);
+      const step = speedPerSecond * delta;
 
       if (distance <= step) {
-        const waitSeconds = waitForControl(nextNodeId, elapsedSeconds);
+        const arrival = resolveTrafficControlArrival({
+          car,
+          nextNode,
+          tickStartedAtSeconds: state.elapsedSeconds,
+          distanceToNode: distance,
+          speedPerSecond,
+        });
+        if (!arrival.canEnter) {
+          return {
+            ...car,
+            ...arrival.agent,
+            state: car.chosenSpotId ? "parking" : "driving",
+          };
+        }
+
         return {
           ...car,
+          ...completeTrafficControlEntry(arrival.agent),
           position: { ...nextNode.position },
           currentNodeId: nextNodeId,
           pathIndex: car.pathIndex + 1,
-          waitSeconds,
         };
       }
 
@@ -142,6 +167,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
           candidateScores: decision.candidate_scores,
           path: path.length > 0 ? path : candidate.path,
           pathIndex: 0,
+          clearedControlNodeId: undefined,
           state: path.length > 0 ? "parking" : "blocked",
         };
       }),
@@ -155,14 +181,4 @@ export function selectedCar(state: Pick<SimulationStore, "cars" | "selectedCarId
 
 export function routeEtaSeconds(car: CarAgent, scenario: ScenarioSettings): number {
   return estimateRouteSeconds(city, car.path.slice(car.pathIndex), scenario.trafficDensity);
-}
-
-function waitForControl(nodeId: string, elapsedSeconds: number): number {
-  const node = nodeById(nodeId);
-  if (node.control === "stop") return 0.8;
-  if (node.control === "traffic-light") {
-    const phase = Math.floor(elapsedSeconds / 7) % 2;
-    return phase === 0 ? 0 : 1.8;
-  }
-  return 0;
 }

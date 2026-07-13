@@ -3,10 +3,27 @@ export type Vec2 = {
   z: number;
 };
 
+export type TrafficLightPhase = {
+  state: "green" | "red";
+  durationSeconds: number;
+  appliesToNodeIds?: string[];
+};
+
+export type TrafficControlConfig =
+  | {
+      kind: "stop";
+      stopDurationSeconds: number;
+    }
+  | {
+      kind: "traffic-light";
+      programId: string;
+      phases: TrafficLightPhase[];
+    };
+
 export type RoadNode = {
   id: string;
   position: Vec2;
-  control?: "stop" | "traffic-light";
+  control?: TrafficControlConfig;
 };
 
 export type RoadEdge = {
@@ -82,6 +99,9 @@ export type CarAgent = {
   candidateScores?: CandidateScore[];
   decisionRequested?: boolean;
   waitSeconds?: number;
+  waitReason?: string;
+  waitingForControlNodeId?: string;
+  clearedControlNodeId?: string;
 };
 
 export type CandidateScore = {
@@ -105,4 +125,3 @@ export type CityMap = {
   destinations: Destination[];
   parkingSpots: ParkingSpot[];
 };
-
