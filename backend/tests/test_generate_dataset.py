@@ -2,19 +2,22 @@ from __future__ import annotations
 
 import json
 import math
+import random
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 from backend.app.feature_engineering import (
     FEATURE_NAMES,
     candidate_feature_map,
     candidate_feature_vector,
 )
-from backend.app.oracle import is_eligible, score_candidate
+from backend.app.oracle import INELIGIBLE_SCORE, is_eligible, score_candidate
 from backend.app.schemas import ParkingDecisionRequest
 from backend.ml.dataset_schema import SyntheticParkingSample
-from backend.ml.generate_dataset import SCENARIO_PROFILES, generate_dataset
+from backend.ml.generate_dataset import SCENARIO_PROFILES, build_sample, generate_dataset
 
 
 def _read_jsonl(path: Path) -> list[dict[str, object]]:
@@ -23,6 +26,10 @@ def _read_jsonl(path: Path) -> list[dict[str, object]]:
 
 def _read_samples(path: Path) -> list[SyntheticParkingSample]:
     return [SyntheticParkingSample.model_validate(row) for row in _read_jsonl(path)]
+
+
+def _sample_payload(index: int = 6, seed: int = 73) -> dict[str, object]:
+    return build_sample(random.Random(seed), index=index, seed=seed).model_dump(mode="json")
 
 
 def test_generate_dataset_is_deterministic_with_seed(tmp_path: Path):
@@ -149,6 +156,67 @@ def test_dataset_is_compatible_with_parking_decision_request(tmp_path: Path):
 
         assert request.candidates
         assert sample.oracle_label.selected_candidate_id == expected_selected
+
+
+@pytest.mark.parametrize(
+    ("selected_id", "selected_index"),
+    [(None, 0), ("existing", None)],
+)
+def test_schema_rejects_incomplete_oracle_selection(
+    selected_id: str | None, selected_index: int | None
+):
+    payload = _sample_payload()
+    if selected_id == "existing":
+        selected_id = payload["candidates"][0]["id"]
+    payload["oracle_label"]["selected_candidate_id"] = selected_id
+    payload["oracle_label"]["selected_candidate_index"] = selected_index
+
+    with pytest.raises(ValueError, match="ID and index must both be set or both be null"):
+        SyntheticParkingSample.model_validate(payload)
+
+
+def test_schema_rejects_oracle_selection_for_unknown_candidate():
+    payload = _sample_payload()
+    payload["oracle_label"]["selected_candidate_id"] = "missing-candidate"
+    payload["oracle_label"]["selected_candidate_index"] = 0
+
+    with pytest.raises(ValueError, match="must reference a candidate"):
+        SyntheticParkingSample.model_validate(payload)
+
+
+def test_schema_rejects_ineligible_oracle_selection():
+    payload = _sample_payload()
+    candidate_id = payload["candidates"][0]["id"]
+    payload["candidates"][0]["legal"] = False
+    payload["candidate_features"][0].update(
+        eligible=False,
+        label=INELIGIBLE_SCORE,
+    )
+    payload["oracle_label"]["scores"][0].update(
+        eligible=False,
+        score=INELIGIBLE_SCORE,
+    )
+    payload["oracle_label"]["selected_candidate_id"] = candidate_id
+    payload["oracle_label"]["selected_candidate_index"] = 0
+
+    with pytest.raises(ValueError, match="selected candidate must be eligible"):
+        SyntheticParkingSample.model_validate(payload)
+
+
+def test_schema_rejects_oracle_selection_below_highest_eligible_score():
+    payload = _sample_payload()
+    eligible_scores = [
+        score for score in payload["oracle_label"]["scores"] if score["eligible"]
+    ]
+    selected_score = min(eligible_scores, key=lambda score: score["score"])
+    selected_index = payload["metadata"]["candidate_ids"].index(
+        selected_score["candidate_id"]
+    )
+    payload["oracle_label"]["selected_candidate_id"] = selected_score["candidate_id"]
+    payload["oracle_label"]["selected_candidate_index"] = selected_index
+
+    with pytest.raises(ValueError, match="highest eligible score"):
+        SyntheticParkingSample.model_validate(payload)
 
 
 def test_preview_cli_writes_five_samples(tmp_path: Path):
