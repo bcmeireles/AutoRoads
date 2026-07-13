@@ -6,7 +6,7 @@ import type {
   ExplanationTerm,
   ScenarioSettings,
 } from "../types";
-import { distanceMeters, estimateRouteSeconds, findRoute } from "../sim/routing";
+import { distanceMeters, estimateRouteSeconds, findDetailedRoute } from "../sim/routing";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
 
@@ -71,19 +71,22 @@ export function buildCandidates(
   settings: ScenarioSettings,
 ) {
   return city.parkingSpots.map((spot) => {
-    const path = findRoute(city, car.currentNodeId, spot.nodeId);
+    const route = findDetailedRoute(city, car.currentNodeId, spot.nodeId);
+    const reachable = route.blockedReason === undefined;
+    const availability = Math.max(0, spot.baseAvailability - settings.parkingScarcity * 0.45);
     return {
       id: spot.id,
       position: spot.position,
-      drive_eta_seconds:
-        estimateRouteSeconds(city, path, settings.trafficDensity) || 999,
+      drive_eta_seconds: reachable
+        ? estimateRouteSeconds(city, route, settings.trafficDensity)
+        : 999,
       walk_distance_meters: distanceMeters(spot.position, destination.position),
       price: spot.price,
-      availability: Math.max(0, spot.baseAvailability - settings.parkingScarcity * 0.45),
+      availability: reachable ? availability : 0,
       occupancy_risk: Math.min(1, spot.occupancyRisk + settings.parkingScarcity * 0.35),
       congestion: Math.min(1, settings.trafficDensity * 0.7 + settings.tripDemand * 0.25),
       legal: spot.legal,
-      accessible: spot.accessible,
+      accessible: spot.accessible && reachable,
     };
   });
 }
