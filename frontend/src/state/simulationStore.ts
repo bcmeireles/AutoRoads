@@ -3,7 +3,12 @@ import { create } from "zustand";
 import { decideParking, localFallbackDecision } from "../api/parking";
 import { city, initialCars } from "../sim/city";
 import { estimateRouteSeconds, findRoute } from "../sim/routing";
-import { controlStateAt } from "../sim/trafficControls";
+import {
+  advanceTrafficControlWait,
+  completeTrafficControlEntry,
+  hasActiveTrafficControlWait,
+  resolveTrafficControlArrival,
+} from "../sim/trafficControls";
 import type { CarAgent, ScenarioSettings } from "../types";
 
 type SimulationStore = {
@@ -66,18 +71,11 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
     const cars: CarAgent[] = state.cars.map((car) => {
       if (car.state === "parked" || car.state === "choosing_parking") return car;
-      if (car.waitSeconds && car.waitSeconds > 0) {
-        const waitSeconds = Math.max(0, car.waitSeconds - delta);
+      if (hasActiveTrafficControlWait(car)) {
         const waitingNode = car.waitingForControlNodeId ? nodeById(car.waitingForControlNodeId) : undefined;
         return {
           ...car,
-          waitSeconds,
-          waitReason: waitSeconds > 0 ? car.waitReason : undefined,
-          clearedControlNodeId:
-            waitSeconds === 0 && waitingNode?.control?.kind === "stop"
-              ? car.waitingForControlNodeId
-              : car.clearedControlNodeId,
-          waitingForControlNodeId: waitSeconds > 0 ? car.waitingForControlNodeId : undefined,
+          ...advanceTrafficControlWait(car, delta, waitingNode),
         };
       }
 
@@ -101,31 +99,31 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       const dx = nextNode.position.x - car.position.x;
       const dz = nextNode.position.z - car.position.z;
       const distance = Math.hypot(dx, dz);
-      const step = Math.max(2, car.speed * trafficMultiplier) * delta;
+      const speedPerSecond = Math.max(2, car.speed * trafficMultiplier);
+      const step = speedPerSecond * delta;
 
       if (distance <= step) {
-        if (car.clearedControlNodeId !== nextNodeId) {
-          const controlState = controlStateAt(nextNode, elapsedSeconds, car.currentNodeId);
-          if (!controlState.canEnter) {
-            return {
-              ...car,
-              state: car.chosenSpotId ? "parking" : "driving",
-              waitSeconds: controlState.waitSeconds,
-              waitReason: controlState.reason,
-              waitingForControlNodeId: nextNodeId,
-            };
-          }
+        const arrival = resolveTrafficControlArrival({
+          car,
+          nextNode,
+          tickStartedAtSeconds: state.elapsedSeconds,
+          distanceToNode: distance,
+          speedPerSecond,
+        });
+        if (!arrival.canEnter) {
+          return {
+            ...car,
+            ...arrival.agent,
+            state: car.chosenSpotId ? "parking" : "driving",
+          };
         }
 
         return {
           ...car,
+          ...completeTrafficControlEntry(arrival.agent),
           position: { ...nextNode.position },
           currentNodeId: nextNodeId,
           pathIndex: car.pathIndex + 1,
-          clearedControlNodeId: undefined,
-          waitReason: undefined,
-          waitSeconds: 0,
-          waitingForControlNodeId: undefined,
         };
       }
 

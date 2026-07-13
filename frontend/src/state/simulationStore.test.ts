@@ -23,17 +23,85 @@ describe("simulation traffic-control waits", () => {
     expect(car.waitSeconds).toBeGreaterThan(0);
   });
 
-  it("clears the wait after the control duration elapses", () => {
+  it("waits in place, enters once, and stops again on a later visit", () => {
     useSimulationStore.getState().setScenario("trafficDensity", 0);
-    useSimulationStore.getState().tick(4);
-    const waitSeconds = carById("car-1").waitSeconds ?? 0;
+    useSimulationStore.setState({ cars: [stopLoopCar()] });
+    const stoppedPosition = { ...nodePosition("n1") };
 
-    useSimulationStore.getState().tick(waitSeconds + 0.1);
+    useSimulationStore.getState().tick(1);
+    let car = carById("stop-loop-car");
+    expect(car.position).toEqual(stoppedPosition);
+    expect(car.currentNodeId).toBe("n1");
+    expect(car.pathIndex).toBe(0);
+    expect(car.waitSeconds).toBe(0.9);
 
-    const car = carById("car-1");
+    useSimulationStore.getState().tick(0.89);
+    car = carById("stop-loop-car");
+    expect(car.position).toEqual(stoppedPosition);
+    expect(car.pathIndex).toBe(0);
+    expect(car.waitSeconds).toBeCloseTo(0.01);
+    expect(car.clearedControlNodeId).toBeUndefined();
+
+    useSimulationStore.getState().tick(0.01);
+    car = carById("stop-loop-car");
+    expect(car.position).toEqual(stoppedPosition);
     expect(car.waitReason).toBeUndefined();
     expect(car.waitingForControlNodeId).toBeUndefined();
     expect(car.clearedControlNodeId).toBe("n2");
+
+    useSimulationStore.getState().tick(1);
+    car = carById("stop-loop-car");
+    expect(car.currentNodeId).toBe("n2");
+    expect(car.pathIndex).toBe(1);
+    expect(car.clearedControlNodeId).toBeUndefined();
+
+    useSimulationStore.getState().tick(1);
+    car = carById("stop-loop-car");
+    expect(car.currentNodeId).toBe("n1");
+    expect(car.pathIndex).toBe(2);
+
+    useSimulationStore.getState().tick(1);
+    car = carById("stop-loop-car");
+    expect(car.position).toEqual(stoppedPosition);
+    expect(car.currentNodeId).toBe("n1");
+    expect(car.pathIndex).toBe(2);
+    expect(car.waitingForControlNodeId).toBe("n2");
+    expect(car.waitSeconds).toBe(0.9);
+  });
+
+  it("allows an arrival just before green changes to red", () => {
+    useSimulationStore.getState().setScenario("trafficDensity", 0);
+    useSimulationStore.setState({
+      elapsedSeconds: 6.5,
+      cars: [lightBoundaryCar("before-red")],
+    });
+
+    useSimulationStore.getState().tick(1);
+
+    const car = carById("before-red");
+    expect(useSimulationStore.getState().elapsedSeconds).toBe(7.5);
+    expect(car.currentNodeId).toBe("n4");
+    expect(car.pathIndex).toBe(1);
+    expect(car.waitReason).toBeUndefined();
+  });
+
+  it("holds an arrival just before red changes to green", () => {
+    useSimulationStore.getState().setScenario("trafficDensity", 0);
+    useSimulationStore.setState({
+      elapsedSeconds: 13.5,
+      cars: [lightBoundaryCar("before-green")],
+    });
+
+    useSimulationStore.getState().tick(1);
+
+    const car = carById("before-green");
+    expect(useSimulationStore.getState().elapsedSeconds).toBe(14.5);
+    expect(car.currentNodeId).toBe("n3");
+    expect(car.pathIndex).toBe(0);
+    expect(car.position.x).toBeCloseTo(67.01);
+    expect(car.waitingForControlNodeId).toBe("n4");
+    expect(car.waitReason).toBe("Red light at n4");
+    expect(car.waitSeconds).toBeCloseTo(0.001);
   });
 
   it("keeps moving through a mid-edge red flip and waits at the arrival boundary", () => {
@@ -92,5 +160,27 @@ function lightApproachCar(): CarAgent {
     pathIndex: 0,
     state: "driving",
     speed: 10,
+  };
+}
+
+function lightBoundaryCar(id: string): CarAgent {
+  return {
+    ...lightApproachCar(),
+    id,
+    position: { x: 67.01, z: nodePosition("n4").z },
+  };
+}
+
+function stopLoopCar(): CarAgent {
+  return {
+    id: "stop-loop-car",
+    color: "#3b82f6",
+    position: { ...nodePosition("n1") },
+    currentNodeId: "n1",
+    destinationId: "market",
+    path: ["n1", "n2", "n1", "n2"],
+    pathIndex: 0,
+    state: "driving",
+    speed: 48,
   };
 }

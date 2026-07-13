@@ -1,5 +1,7 @@
 import type { CarAgent, RoadNode, TrafficLightPhase } from "../types";
 
+const WAIT_EPSILON_SECONDS = 1e-9;
+
 export type TrafficControlState = {
   kind: "none" | "stop" | "traffic-light";
   signal: "none" | "stop" | "green" | "red";
@@ -8,6 +10,21 @@ export type TrafficControlState = {
   reason?: string;
   phaseIndex?: number;
   programId?: string;
+};
+
+export type TrafficControlAgentState = Pick<
+  CarAgent,
+  | "currentNodeId"
+  | "waitSeconds"
+  | "waitReason"
+  | "waitingForControlNodeId"
+  | "clearedControlNodeId"
+>;
+
+export type TrafficControlArrival = {
+  canEnter: boolean;
+  arrivalSeconds: number;
+  agent: TrafficControlAgentState;
 };
 
 export function controlStateAt(
@@ -76,6 +93,79 @@ export function requiredWaitSeconds(
 ): number {
   const state = controlStateAt(nextNode, elapsedSeconds, car.currentNodeId);
   return state.canEnter ? 0 : state.waitSeconds;
+}
+
+export function hasActiveTrafficControlWait(car: TrafficControlAgentState): boolean {
+  return (car.waitSeconds ?? 0) > 0;
+}
+
+export function advanceTrafficControlWait(
+  car: TrafficControlAgentState,
+  deltaSeconds: number,
+  waitingNode?: RoadNode,
+): TrafficControlAgentState {
+  const remainingWait = Math.max(0, (car.waitSeconds ?? 0) - Math.max(0, deltaSeconds));
+  const waitSeconds = remainingWait <= WAIT_EPSILON_SECONDS ? 0 : remainingWait;
+  const completedStopNodeId =
+    waitSeconds === 0 &&
+    waitingNode &&
+    waitingNode.id === car.waitingForControlNodeId &&
+    waitingNode.control?.kind === "stop"
+      ? waitingNode.id
+      : undefined;
+
+  return {
+    ...car,
+    waitSeconds,
+    waitReason: waitSeconds > 0 ? car.waitReason : undefined,
+    waitingForControlNodeId: waitSeconds > 0 ? car.waitingForControlNodeId : undefined,
+    clearedControlNodeId: completedStopNodeId ?? car.clearedControlNodeId,
+  };
+}
+
+export function resolveTrafficControlArrival(input: {
+  car: TrafficControlAgentState;
+  nextNode: RoadNode;
+  tickStartedAtSeconds: number;
+  distanceToNode: number;
+  speedPerSecond: number;
+}): TrafficControlArrival {
+  const { car, nextNode } = input;
+  const travelSeconds =
+    Math.max(0, input.distanceToNode) / Math.max(Number.EPSILON, input.speedPerSecond);
+  const arrivalSeconds = input.tickStartedAtSeconds + travelSeconds;
+
+  if (car.clearedControlNodeId === nextNode.id) {
+    return { canEnter: true, arrivalSeconds, agent: car };
+  }
+
+  const controlState = controlStateAt(nextNode, arrivalSeconds, car.currentNodeId);
+  if (controlState.canEnter) {
+    return { canEnter: true, arrivalSeconds, agent: car };
+  }
+
+  return {
+    canEnter: false,
+    arrivalSeconds,
+    agent: {
+      ...car,
+      waitSeconds: controlState.waitSeconds,
+      waitReason: controlState.reason,
+      waitingForControlNodeId: nextNode.id,
+    },
+  };
+}
+
+export function completeTrafficControlEntry(
+  car: TrafficControlAgentState,
+): TrafficControlAgentState {
+  return {
+    ...car,
+    waitSeconds: 0,
+    waitReason: undefined,
+    waitingForControlNodeId: undefined,
+    clearedControlNodeId: undefined,
+  };
 }
 
 function secondsUntilGreen(

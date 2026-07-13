@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { CarAgent, RoadNode } from "../types";
-import { controlStateAt, requiredWaitSeconds } from "./trafficControls";
+import {
+  advanceTrafficControlWait,
+  completeTrafficControlEntry,
+  controlStateAt,
+  requiredWaitSeconds,
+  resolveTrafficControlArrival,
+} from "./trafficControls";
 
 const car = {
   id: "car-1",
@@ -65,7 +71,89 @@ describe("traffic controls", () => {
     expect(controlStateAt(node, 2, "blocked-approach").canEnter).toBe(false);
     expect(controlStateAt(node, 2, "open-approach").canEnter).toBe(true);
   });
+
+  it("evaluates signals at the actual arrival time before each phase transition", () => {
+    const beforeRed = resolveTrafficControlArrival({
+      car: agentCar(),
+      nextNode: lightNode(),
+      tickStartedAtSeconds: 6.5,
+      distanceToNode: 4.99,
+      speedPerSecond: 10,
+    });
+    const beforeGreen = resolveTrafficControlArrival({
+      car: agentCar(),
+      nextNode: lightNode(),
+      tickStartedAtSeconds: 13.5,
+      distanceToNode: 4.99,
+      speedPerSecond: 10,
+    });
+
+    expect(beforeRed.arrivalSeconds).toBeCloseTo(6.999);
+    expect(beforeRed.canEnter).toBe(true);
+    expect(beforeGreen.arrivalSeconds).toBeCloseTo(13.999);
+    expect(beforeGreen.canEnter).toBe(false);
+    expect(beforeGreen.agent.waitSeconds).toBeCloseTo(0.001);
+  });
+
+  it("grants one stop entry after waiting and requires another wait on revisit", () => {
+    const node: RoadNode = {
+      id: "stop-node",
+      position: { x: 0, z: 0 },
+      control: { kind: "stop", stopDurationSeconds: 0.9 },
+    };
+    const firstArrival = resolveTrafficControlArrival({
+      car: agentCar(),
+      nextNode: node,
+      tickStartedAtSeconds: 0,
+      distanceToNode: 1,
+      speedPerSecond: 10,
+    });
+
+    expect(firstArrival.canEnter).toBe(false);
+    const stillWaiting = advanceTrafficControlWait(firstArrival.agent, 0.89, node);
+    expect(stillWaiting.waitSeconds).toBeCloseTo(0.01);
+    expect(stillWaiting.clearedControlNodeId).toBeUndefined();
+
+    const cleared = advanceTrafficControlWait(stillWaiting, 0.01, node);
+    expect(cleared.waitSeconds).toBe(0);
+    expect(cleared.clearedControlNodeId).toBe(node.id);
+
+    const permittedEntry = resolveTrafficControlArrival({
+      car: cleared,
+      nextNode: node,
+      tickStartedAtSeconds: 1,
+      distanceToNode: 0,
+      speedPerSecond: 10,
+    });
+    expect(permittedEntry.canEnter).toBe(true);
+
+    const afterEntry = completeTrafficControlEntry(permittedEntry.agent);
+    const repeatArrival = resolveTrafficControlArrival({
+      car: { ...afterEntry, currentNodeId: "other-node" },
+      nextNode: node,
+      tickStartedAtSeconds: 2,
+      distanceToNode: 0,
+      speedPerSecond: 10,
+    });
+    expect(afterEntry.clearedControlNodeId).toBeUndefined();
+    expect(repeatArrival.canEnter).toBe(false);
+    expect(repeatArrival.agent.waitSeconds).toBe(0.9);
+  });
 });
+
+function agentCar(): CarAgent {
+  return {
+    id: "agent-car",
+    color: "#ffffff",
+    position: { x: 0, z: 0 },
+    currentNodeId: "before-light",
+    destinationId: "station",
+    path: ["before-light", "light-node"],
+    pathIndex: 0,
+    state: "driving",
+    speed: 10,
+  };
+}
 
 function lightNode(): RoadNode {
   return {
