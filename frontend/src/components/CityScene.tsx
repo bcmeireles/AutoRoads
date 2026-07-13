@@ -7,7 +7,18 @@ import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { city } from "../sim/city";
 import { useSimulationStore } from "../state/simulationStore";
 import type { Building, CandidateScore, CarAgent, ParkingSpot, RoadEdge, Vec2 } from "../types";
-import { sceneRoutePoints, shouldShowPendingCandidateCues } from "./citySceneHelpers";
+import {
+  cameraFitZoom,
+  carHeading,
+  carStateColor,
+  clampCameraTarget,
+  controlStateAt,
+  handleCarMarkerClick,
+  parkingMarkerAppearance,
+  sceneRoutePoints,
+  shouldShowPendingCandidateCues,
+} from "./citySceneHelpers";
+import type { SceneControlledNode } from "./citySceneHelpers";
 
 const nodePosition = (id: string) => city.nodes.find((node) => node.id === id)!.position;
 
@@ -18,16 +29,6 @@ const CAMERA_PAN_LIMITS = {
   maxX: 62,
   minZ: -42,
   maxZ: 42,
-};
-
-const cameraFitZoom = (width: number, height: number) => {
-  const paddedWorldWidth = 214;
-  const paddedWorldHeight = 178;
-  return THREE.MathUtils.clamp(
-    Math.min(width / paddedWorldWidth, height / paddedWorldHeight),
-    1.65,
-    5.2,
-  );
 };
 
 export function CityScene() {
@@ -100,8 +101,7 @@ function SceneContent() {
         .map((node) => (
           <TrafficControl
             key={node.id}
-            position={node.position}
-            kind={node.control!}
+            node={node}
             elapsedSeconds={elapsedSeconds}
           />
         ))}
@@ -136,21 +136,12 @@ function CameraRig() {
   useFrame(() => {
     const controls = controlsRef.current;
     if (!controls) return;
-    const clampedX = THREE.MathUtils.clamp(
-      controls.target.x,
-      CAMERA_PAN_LIMITS.minX,
-      CAMERA_PAN_LIMITS.maxX,
-    );
-    const clampedZ = THREE.MathUtils.clamp(
-      controls.target.z,
-      CAMERA_PAN_LIMITS.minZ,
-      CAMERA_PAN_LIMITS.maxZ,
-    );
-    const dx = clampedX - controls.target.x;
-    const dz = clampedZ - controls.target.z;
+    const clampedTarget = clampCameraTarget(controls.target, CAMERA_PAN_LIMITS);
+    const dx = clampedTarget.x - controls.target.x;
+    const dz = clampedTarget.z - controls.target.z;
     if (dx === 0 && dz === 0) return;
-    controls.target.x = clampedX;
-    controls.target.z = clampedZ;
+    controls.target.x = clampedTarget.x;
+    controls.target.z = clampedTarget.z;
     camera.position.x += dx;
     camera.position.z += dz;
     controls.update();
@@ -387,33 +378,38 @@ function ParkingSpotMarker({
   isNearestBaseline: boolean;
   showPendingCandidate: boolean;
 }) {
-  const isCandidate = Boolean(candidateScore) || showPendingCandidate;
-  const isEligibleCandidate = candidateScore?.eligible ?? showPendingCandidate;
-  const baseColor = !spot.legal ? "#fecaca" : !spot.accessible ? "#cbd5e1" : "#f8fafc";
-  const edgeColor = !spot.legal ? "#dc2626" : !spot.accessible ? "#475569" : "#94a3b8";
+  const appearance = parkingMarkerAppearance(spot, {
+    candidateScore,
+    isChosen,
+    isNearestBaseline,
+    showPendingCandidate,
+  });
 
   return (
     <group position={[spot.position.x, 0, spot.position.z]}>
-      {isCandidate && (
-        <CandidateParkingCue rank={candidateScore?.rank} eligible={isEligibleCandidate} />
+      {appearance.isCandidate && (
+        <CandidateParkingCue
+          rank={appearance.candidateRank}
+          eligible={appearance.isEligibleCandidate}
+        />
       )}
-      {isNearestBaseline && <NearestBaselineCue />}
-      {isChosen && <ChosenParkingCue />}
+      {appearance.showNearestBaselineCue && <NearestBaselineCue />}
+      {appearance.showChosenCue && <ChosenParkingCue />}
       <mesh position={[0, 0.18, 0]}>
         <boxGeometry args={[5.8, 0.36, 7.8]} />
-        <meshStandardMaterial color={baseColor} roughness={0.76} />
+        <meshStandardMaterial color={appearance.baseColor} roughness={0.76} />
       </mesh>
       <mesh position={[0, 0.4, -3.6]}>
         <boxGeometry args={[5.6, 0.18, 0.34]} />
-        <meshStandardMaterial color={edgeColor} roughness={0.7} />
+        <meshStandardMaterial color={appearance.edgeColor} roughness={0.7} />
       </mesh>
       <mesh position={[0, 0.4, 3.6]}>
         <boxGeometry args={[5.6, 0.18, 0.34]} />
-        <meshStandardMaterial color={edgeColor} roughness={0.7} />
+        <meshStandardMaterial color={appearance.edgeColor} roughness={0.7} />
       </mesh>
-      {spot.legal && spot.accessible && <ParkingLetter />}
-      {!spot.legal && <IllegalParkingCue />}
-      {spot.legal && !spot.accessible && <InaccessibleParkingCue />}
+      {appearance.showParkingLetter && <ParkingLetter />}
+      {appearance.showIllegalCue && <IllegalParkingCue />}
+      {appearance.showInaccessibleCue && <InaccessibleParkingCue />}
     </group>
   );
 }
@@ -536,18 +532,20 @@ function InaccessibleParkingCue() {
 }
 
 function TrafficControl({
-  position,
-  kind,
+  node,
   elapsedSeconds,
 }: {
-  position: Vec2;
-  kind: "stop" | "traffic-light";
+  node: SceneControlledNode;
   elapsedSeconds: number;
 }) {
-  const isGreen = Math.floor(elapsedSeconds / 7) % 2 === 1;
+  const state = controlStateAt(node, elapsedSeconds);
   return (
-    <group position={[position.x + 5.4, 0, position.z + 5.4]}>
-      {kind === "stop" ? <StopSign /> : <TrafficLight isGreen={isGreen} />}
+    <group position={[node.position.x + 5.4, 0, node.position.z + 5.4]}>
+      {state.kind === "stop" ? (
+        <StopSign />
+      ) : (
+        <TrafficLight isGreen={state.signal === "green"} />
+      )}
     </group>
   );
 }
@@ -614,16 +612,13 @@ function CarMarker({
   isSelected: boolean;
   onSelect: () => void;
 }) {
-  const heading = carHeading(car);
+  const heading = carHeading(car, city.nodes);
   const stateColor = carStateColor(car);
   return (
     <group
       position={[car.position.x, 0.18, car.position.z]}
       rotation={[0, heading, 0]}
-      onClick={(event) => {
-        event.stopPropagation();
-        onSelect();
-      }}
+      onClick={(event) => handleCarMarkerClick(event, onSelect)}
     >
       {isSelected && (
         <mesh position={[0, 0.08, 0]} rotation={[Math.PI / 2, 0, 0]}>
@@ -703,22 +698,4 @@ function CarStateCue({ state, color }: { state: CarAgent["state"]; color: string
   }
 
   return null;
-}
-
-function carStateColor(car: CarAgent) {
-  if (car.state === "choosing_parking") return "#f97316";
-  if (car.state === "parking") return "#f59e0b";
-  if (car.state === "parked") return "#10b981";
-  if (car.state === "blocked") return "#dc2626";
-  return "#38bdf8";
-}
-
-function carHeading(car: CarAgent) {
-  const nextNodeId = car.path[car.pathIndex + 1] ?? car.path[car.pathIndex];
-  const nextNode = nextNodeId ? nodePosition(nextNodeId) : undefined;
-  if (!nextNode) return 0;
-  const dx = nextNode.x - car.position.x;
-  const dz = nextNode.z - car.position.z;
-  if (Math.hypot(dx, dz) < 0.1) return 0;
-  return Math.atan2(dx, dz);
 }
