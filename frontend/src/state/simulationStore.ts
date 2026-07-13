@@ -22,6 +22,7 @@ type SimulationStore = {
 const destinationById = (id: string) => city.destinations.find((destination) => destination.id === id)!;
 const nodeById = (id: string) => city.nodes.find((node) => node.id === id)!;
 const spotById = (id: string) => city.parkingSpots.find((spot) => spot.id === id)!;
+const inFlightParkingDecisions = new Set<string>();
 
 const defaultScenario: ScenarioSettings = {
   trafficDensity: 0.42,
@@ -63,6 +64,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     const elapsedSeconds = state.elapsedSeconds + delta;
     const trafficMultiplier = 1 - state.scenario.trafficDensity * 0.38;
 
+    const carsNeedingParking: string[] = [];
     const cars: CarAgent[] = state.cars.map((car) => {
       if (car.state === "parked" || car.state === "choosing_parking") return car;
       if (car.waitSeconds && car.waitSeconds > 0) {
@@ -79,8 +81,14 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
           };
         }
         if (!car.decisionRequested) {
-          void get().requestParkingDecision(car.id);
-          return { ...car, state: "choosing_parking", decisionRequested: true };
+          carsNeedingParking.push(car.id);
+          return {
+            ...car,
+            state: "choosing_parking",
+            decisionRequested: true,
+            parkingDecisionStatus: "pending",
+            parkingDecisionError: undefined,
+          };
         }
         return car;
       }
@@ -113,36 +121,76 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     });
 
     set({ elapsedSeconds, cars });
+    for (const carId of carsNeedingParking) {
+      void get().requestParkingDecision(carId);
+    }
   },
   requestParkingDecision: async (carId) => {
     const state = get();
     const car = state.cars.find((candidate) => candidate.id === carId);
-    if (!car) return;
+    if (!car || inFlightParkingDecisions.has(carId)) return;
+
+    inFlightParkingDecisions.add(carId);
+    set((latest) => ({
+      cars: latest.cars.map((candidate) =>
+        candidate.id === carId
+          ? {
+              ...candidate,
+              state: "choosing_parking",
+              decisionRequested: true,
+              parkingDecisionStatus: "pending",
+              parkingDecisionError: undefined,
+            }
+          : candidate,
+      ),
+    }));
 
     const destination = destinationById(car.destinationId);
     let decision;
+    let status: "backend" | "fallback" = "backend";
+    let decisionError: string | undefined;
     try {
       decision = await decideParking(city, car, destination, state.scenario);
-    } catch {
+    } catch (error) {
       decision = localFallbackDecision(city, car, destination, state.scenario);
+      status = "fallback";
+      decisionError = error instanceof Error ? error.message : "Parking API request failed.";
+    } finally {
+      inFlightParkingDecisions.delete(carId);
     }
 
     const chosenSpotId = decision.selected_spot_id ?? undefined;
     set((latest) => ({
       cars: latest.cars.map((candidate) => {
         if (candidate.id !== carId) return candidate;
-        const spot = chosenSpotId ? spotById(chosenSpotId) : undefined;
+        if (candidate.state !== "choosing_parking" || !candidate.decisionRequested) return candidate;
+
+        const spot = chosenSpotId
+          ? city.parkingSpots.find((parkingSpot) => parkingSpot.id === chosenSpotId)
+          : undefined;
         const path = spot ? findRoute(city, candidate.currentNodeId, spot.nodeId) : [];
+        const blockedReason = !chosenSpotId
+          ? "No eligible parking spot was selected."
+          : !spot
+            ? `Selected parking spot ${chosenSpotId} does not exist.`
+            : path.length === 0
+              ? `No route exists to selected parking spot ${chosenSpotId}.`
+              : undefined;
         return {
           ...candidate,
           chosenSpotId,
           baselineSpotId: decision.baselines.find((baseline) => baseline.strategy === "nearest")?.spot_id ?? undefined,
+          randomBaselineSpotId:
+            decision.baselines.find((baseline) => baseline.strategy === "random")?.spot_id ?? undefined,
           modelVersion: decision.model_version,
           explanation: decision.explanation,
           candidateScores: decision.candidate_scores,
           path: path.length > 0 ? path : candidate.path,
           pathIndex: 0,
-          state: path.length > 0 ? "parking" : "blocked",
+          state: blockedReason ? "blocked" : "parking",
+          decisionRequested: false,
+          parkingDecisionStatus: blockedReason ? "blocked" : status,
+          parkingDecisionError: blockedReason ?? decisionError,
         };
       }),
     }));

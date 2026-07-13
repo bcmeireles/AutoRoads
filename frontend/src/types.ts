@@ -65,6 +65,13 @@ export type CarAgentState =
   | "parked"
   | "blocked";
 
+export type ParkingDecisionStatus =
+  | "idle"
+  | "pending"
+  | "backend"
+  | "fallback"
+  | "blocked";
+
 export type CarAgent = {
   id: string;
   color: string;
@@ -77,10 +84,13 @@ export type CarAgent = {
   speed: number;
   chosenSpotId?: string;
   baselineSpotId?: string;
+  randomBaselineSpotId?: string;
   modelVersion?: string;
   explanation?: ExplanationTerm[];
   candidateScores?: CandidateScore[];
   decisionRequested?: boolean;
+  parkingDecisionStatus?: ParkingDecisionStatus;
+  parkingDecisionError?: string;
   waitSeconds?: number;
 };
 
@@ -105,4 +115,3 @@ export type CityMap = {
   destinations: Destination[];
   parkingSpots: ParkingSpot[];
 };
-
