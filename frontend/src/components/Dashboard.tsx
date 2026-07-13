@@ -27,6 +27,9 @@ export function Dashboard() {
   const destination = city.destinations.find((item) => item.id === car.destinationId);
   const selectedSpot = city.parkingSpots.find((spot) => spot.id === car.chosenSpotId);
   const baselineSpot = city.parkingSpots.find((spot) => spot.id === car.baselineSpotId);
+  const randomBaselineSpot = city.parkingSpots.find(
+    (spot) => spot.id === car.randomBaselineSpotId,
+  );
   const eta = routeEtaSeconds(car, state.scenario);
 
   return (
@@ -85,8 +88,11 @@ export function Dashboard() {
         <div className="stat-grid">
           <Metric label="Chosen" value={selectedSpot?.id ?? "pending"} />
           <Metric label="Nearest baseline" value={baselineSpot?.id ?? "pending"} />
+          <Metric label="Random baseline" value={randomBaselineSpot?.id ?? "pending"} />
+          <Metric label="Decision" value={car.parkingDecisionStatus ?? "idle"} />
           <Metric label="Model" value={car.modelVersion ?? "waiting"} />
         </div>
+        {car.parkingDecisionError ? <p className="muted">{car.parkingDecisionError}</p> : null}
         <div className="score-list">
           {(car.candidateScores ?? []).slice(0, 5).map((score) => (
             <div key={score.spot_id} className="score-row">
@@ -127,4 +133,3 @@ function Metric({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-
